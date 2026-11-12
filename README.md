@@ -60,8 +60,8 @@ From the seller listing 📦 (not verified):
 
 Last clean build — 0 errors, 0 warnings:
 
-- RAM: 39 120 / 327 680 B (11.9 %)
-- Flash: 1 052 013 / 1 310 720 B (80.3 %) of the default app partition
+- RAM: 39 152 / 327 680 B (11.9 %)
+- Flash: 1 053 599 / 1 310 720 B (80.4 %) of the default app partition
 
 ---
 
@@ -147,6 +147,10 @@ How to re-verify the display if it is ever in doubt:
 - `src/time_manager.{h,cpp}` — NTP sync + cached local `tm` (Europe/Kyiv)
 - `src/display_manager.{h,cpp}` — owns the U8g2 object, centred rendering,
   redraw only on change
+- `src/motor_manager.{h,cpp}` — **mock** motor seam: `startRotation()` /
+  `stopRotation()` only log, no pin is configured
+- `src/feeder_manager.{h,cpp}` — time-of-day schedule + `IDLE`/`ROTATING`
+  state machine, drives the motor through `MotorManager`
 
 Modules:
 
@@ -161,6 +165,19 @@ Modules:
 - **DisplayManager** — `begin()`, `showStatus(text)`, `showClock(tm)`
   - redraws only when the rendered strings actually change → ~1 redraw/s while
     the clock runs, 0 redraws for a static status message
+- **MotorManager** — `begin()`, `update()`, `startRotation()`, `stopRotation()`,
+  `state()` — **mock today**, see §4b
+- **FeederManager** — `begin(motor&)`, `update(timeValid, clock)`, `state()`,
+  `feeding()`
+  - `begin()` injects the motor by reference; no virtuals, no heap
+  - a due slot starts the rotation and the duration is measured with `millis()`
+    on later loop passes — nothing ever blocks
+  - one meal per slot per calendar day; the flags reset on `tm_yday`/`tm_year`
+    change
+  - the first valid clock **primes** slots that are already in the past without
+    feeding, so booting at 15:45 does not dump food twice
+  - a clock that jumps **forward** past a slot still feeds it, late and logged;
+    a clock that jumps **back** never re-feeds an already-fired slot
 
 Nothing blocks: no `delay()`, no `waitForConnectResult()`, no
 `while(!WiFi.isConnected())`. All periodic work runs on `millis()`.
@@ -173,12 +190,64 @@ Tunables:
 - `SYNC_TIMEOUT_MS` = 20 s, `RESYNC_INTERVAL_MS` = 15 min,
   `CLOCK_REFRESH_MS` = 1000 ms — `src/time_manager.cpp`
 - `STATUS_Y` = 20, `CLOCK_LINE1_Y` = 16, `CLOCK_LINE2_Y` = 29 — `src/display_manager.cpp`
+- `SCHEDULE` = 06:30 / 15:00 / 22:00, `ROTATION_MS` = 5 s,
+  `MAX_FEED_SLOTS` = 3 — `src/feeder_manager.cpp` (`MAX_FEED_SLOTS` is in
+  `src/feeder_manager.h`); a `static_assert` keeps the table and the array in
+  step when the schedule grows
+
+Schedule times are **local** minutes of the day (`tm_hour * 60 + tm_min`), never
+a fixed UTC offset — `TimeManager` already applies the Europe/Kyiv DST rules
+above, so 06:30 stays 06:30 wall-clock across both DST switches.
 
 Timezone note: the POSIX string above is the Europe/Kyiv rule checked against
 `zdump` — DST starts the last Sunday of March at 03:00 local standard (→ 04:00
 EEST) and ends the last Sunday of October at 04:00 local DST (→ 03:00 EET). It is
 correct from 2011 to present, so winter/summer time switches itself; never
 hardcode a fixed UTC offset.
+
+---
+
+## 4b. The step-motor — NOT implemented yet
+
+Everything below is ❓ **planned, not probed**. No motor, controller or pin has
+ever been attached or tested; the code in `src/motor_manager.cpp` is a mock.
+
+The point of the split is that a hardware swap touches **one file**:
+
+```
+FeederManager  →  policy only: when to feed, how long to run, IDLE/ROTATING
+      │            no pins, no libraries, testable today
+      │ holds MotorManager&
+      ▼
+MotorManager   →  the seam: startRotation() / stopRotation() / configurePins()
+                  today = empty bodies + one log line each
+                  later = pin numbers, pinType, attach(), direction, jam detect
+```
+
+`MotorManager::update()` is already called from `loop()` even though the mock
+leaves it empty — stepper-style motor libraries need a per-loop tick, and having
+the hook now means `main.cpp` does not change when the real motor lands.
+
+To be filled in once the hardware is known, in `src/motor_manager.cpp` only:
+
+| Slot | What lands there |
+|---|---|
+| `configurePins()` | motor/controller pin numbers, `pinType`, `attach()` if a stepper library is used, direction, speed |
+| `startRotation()` / `stopRotation()` | the real actuation |
+| `update()` | the per-loop tick the library needs |
+| `MotorState::NOT_CONFIGURED` | keep it until pins are actually wired |
+
+Pin constraints — only the first two rows are established:
+
+- ✅ GPIO 5 (SDA) and 6 (SCL) are taken by the OLED — do not repurpose
+- ✅ GPIO numbers on ESP32-C3 run 0–21 (Espressif hardware reference)
+- ❓ which of the remaining lines are boot-reserved on this board — **probe
+  before choosing**, do not copy a generic ESP32 pin table
+- ❓ motor model, controller model and the physical pins — unknown, nothing
+  ordered or measured
+
+No library is needed for the mock, so `lib_deps` still lists only `olikraus/U8g2`.
+A stepper library would be added there when the real motor arrives.
 
 ---
 
@@ -212,11 +281,25 @@ pio device list                            # find the device node
   WiFi: connected, assigned IP: 192.168.x.x
   Time: NTP sync attempt 1 (pool.ntp.org, time.google.com)
   Time: NTP sync OK, local time = 12.11.2026 15:45:32 (DST=0)
+  Motor: mock backend, no pins configured
+  Feeder: 3 slots, rotation 5000 ms
   ESP32-C3 CatFeeder: entering main loop
   ```
 
 - OLED sequence: `WiFi...` → `Sync time...` → `12.11.2026` / `15:45:32`
 - Kill the network and you should see `No WiFi` plus reconnect attempts every 10 s
+- At a scheduled minute the trace continues (no motor exists yet, the mock only
+  logs):
+
+  ```
+  Feeder: slot 1 due at 15:00
+  Motor: startRotation (mock)
+  Motor: stopRotation (mock)
+  ```
+
+  and the OLED shows `Feeding` for those 5 s instead of the clock
+- `Feeder: slot N fired M min late` means the clock jumped forward past that
+  slot (DST or an NTP correction) — the meal still happens
 
 ---
 
@@ -235,14 +318,30 @@ pio device list                            # find the device node
   re-arm is what gives faster, visible re-sync and retry logging.
 - Credentials are compile-time macros in a git-ignored header — never move them
   into `main.cpp`, never commit `include/wifi_config.h`.
+- The schedule is compared in **local** minutes of the day, never against a
+  `time_t` built from a fixed UTC offset — that breaks on both DST switches.
+- `FeederManager` measures the rotation with `millis() - start >= ROTATION_MS`,
+  the same wrap-safe form the other modules use; never compare `millis()`
+  against an absolute value.
+- `MotorManager` is a **mock**. Do not add pins to `main.cpp` or `FeederManager`
+  when the real motor arrives — everything goes into `src/motor_manager.cpp`.
+- Feeding is gated on `hasValidTime()`: if NTP never succeeds that day, the cat
+  is not fed. There is no manual override yet.
 
 ## 7. Proven vs assumed
 
 - ✅ Builds and links for `esp32-c3-devkitm-1`, 0 warnings, RAM 11.9 %,
-  Flash 80.3 % of the default app partition
+  Flash 80.4 % of the default app partition
+- ✅ Feeding schedule logic — verified natively against the real
+  `src/feeder_manager.cpp` + `src/motor_manager.cpp` with stubbed `millis()`/
+  `Serial`: one meal per slot per day, flags reset on date rollover, past slots
+  primed without feeding on the first valid clock, forward clock jump feeds late
+  and logs it, backward DST jump does not re-feed
 - ✅ USB-CDC upload + 115200 Serial Monitor (tested earlier on this board)
 - ✅ OLED over I2C, GPIO 5 = SDA, GPIO 6 = SCL, address **0x3D** (I2C scanner)
 - ❓ OLED 72 × 40 and controller SSD1306 — library evidence only, not probed
+- ❓ Motor — **nothing**. No motor, no controller, no pins attached or probed;
+  `startRotation()`/`stopRotation()` are empty mocks
 - 📦 0.42-inch diagonal, ESP32-C3FN4/FH4, ceramic antenna, interface-channel
   counts (4 MB flash and 160 MHz do match the board definition)
 - ❓ Firmware flashed and observed running — not done in this session (no ESP

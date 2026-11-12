@@ -5,6 +5,8 @@
 #include "wifi_manager.h"
 #include "time_manager.h"
 #include "display_manager.h"
+#include "motor_manager.h"
+#include "feeder_manager.h"
 
 // Wi-Fi credentials live in include/wifi_config.h, which is kept out of the
 // repository (see .gitignore). include/wifi_config.example.h documents it.
@@ -28,6 +30,8 @@
 WiFiManager wifiManager;
 TimeManager timeManager;
 DisplayManager displayManager;
+MotorManager motor;
+FeederManager feeder;
 
 void setup() {
     Serial.begin(115200);
@@ -36,6 +40,8 @@ void setup() {
     displayManager.begin();
     wifiManager.begin(WIFI_SSID, WIFI_PASSWORD);
     timeManager.begin();
+    motor.begin();
+    feeder.begin(motor);
 
     Serial.println("ESP32-C3 CatFeeder: entering main loop");
 }
@@ -43,6 +49,8 @@ void setup() {
 void loop() {
     wifiManager.update();
     timeManager.update(wifiManager.connected());
+    feeder.update(timeManager.hasValidTime(), timeManager.localTime());
+    motor.update();
 
     switch (wifiManager.state()) {
     case WiFiConnectionState::CONNECTING:
@@ -55,7 +63,11 @@ void loop() {
 
     case WiFiConnectionState::CONNECTED:
         if (timeManager.hasValidTime()) {
-            displayManager.showClock(timeManager.localTime());
+            if (feeder.feeding()) {
+                displayManager.showStatus("Feeding");
+            } else {
+                displayManager.showClock(timeManager.localTime());
+            }
         } else {
             displayManager.showStatus("Sync time...");
         }
