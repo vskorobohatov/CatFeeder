@@ -1,218 +1,134 @@
-# CatFeeder — ESP32-C3 board with built-in OLED
+# CatFeeder
 
-Hardware and project reference so we never have to re-google the device.
-Every fact is tagged by how well it is established:
+Automatic cat feeder on an ESP32-C3 board with a built-in OLED display.
 
-- ✅ **Confirmed** — measured on the device, or read from this project's code/config
-- 📦 **Seller listing** — from the AliExpress description, not verified
-- ❓ **Assumed** — inherited from the code or a board variant, not proven on hardware
+- The board connects to WiFi and sets its clock from an NTP server.
+- The OLED shows the current time, or a status message while something is happening.
+- Meals are scheduled at fixed times of day. The motor that dispenses food is not implemented yet.
 
----
+## Hardware
 
-## 1. The board
-
-Confirmed ✅ (read from `platformio.ini`, the board definition and the toolchain):
-
-- Target used by the code: `esp32-c3-devkitm-1` (Espressif ESP32-C3-DevKitM-1)
-- MCU: ESP32-C3, **RISC-V** (`rv32`) — not Xtensa; toolchain `toolchain-riscv32-esp`,
-  linker script `esp32c3_out.ld`
-- Clock frequency: 160 MHz (`f_cpu = 160000000L`)
-- Flash: 4 MB total (`maximum_size = 4194304`); the default **app partition** is
-  1 310 720 bytes — that is the number that matters when the build gets bigger
+- Board: `esp32-c3-devkitm-1` (Espressif ESP32-C3-DevKitM-1), sold as "ESP32-C3 0.42-inch OLED Development Board" by YOINNOVATI
+- MCU: ESP32-C3FN4, RISC-V (`rv32`), not Xtensa — toolchain `toolchain-riscv32-esp`, linker script `esp32c3_out.ld`
+- Clock frequency: 160 MHz
+- Flash: 4 MB total, default app partition 1 310 720 bytes
 - RAM: 327 680 bytes
 - Flash mode `qio`, `f_flash` = 80 MHz
-- WiFi + Bluetooth present in the core (`CONFIG_ESP_WIFI_ENABLED=y`)
-- USB-CDC boot mode: enabled and **tested working** on this board
-- RTC: internal RC clock (`CONFIG_ESP32C3_RTC_CLK_SRC_INT_RC=y`), 576 cal cycles
-- ESP32-C3 revision range in the prebuilt core libs: rev 3 … 199
-- GPIO lines are 0–21 (Espressif hardware reference); several are boot-reserved,
-  so do not repurpose pins blindly. GPIO 5 and 6 are taken by the OLED (see §3)
+- WiFi + Bluetooth 5, onboard ceramic antenna
+- OLED panel: 0.42 inch, 72 × 40 px, SSD1306
+- GPIO lines 0–21, several are boot-reserved; GPIO 5 and 6 are used by the OLED
+- USB-CDC boot mode works: upload at 460800 baud, Serial Monitor at 115200
 
-From the seller listing 📦 (not verified):
+## Software stack
 
-- Brand: YOINNOVATI — product: "ESP32-C3 0.42-inch OLED Development Board"
-- MCU variant: ESP32-C3FN4 / FH4 — the letter suffix has **never** been read off
-  the chip, treat it as unconfirmed
-- "Built-in flash: 4M" and "Clock frequency: 160MHz" — these do match the
-  PlatformIO board definition above
-- 2.4G WiFi & Bluetooth 5, onboard ceramic antenna
-- Interface channels: UART 2, ADC 5, SPI 1, GPIO/PWM 11 — this is the ESP32-C3
-  assignable-function "channel" concept; unused by this project and never probed
-- "Chuan C interface: 1 channel" — a mistranslation from the Chinese listing,
-  ignore it
+- PlatformIO Core 6 — commands are `pio run …`, the old `platformio build` subcommand no longer exists
+- Platform `espressif32` 8.0.0, framework Arduino, Arduino core 3.3.12
+- ESP-IDF 5.5.5 baked into the prebuilt core libraries
+- Only external library: `olikraus/U8g2` 2.36.18
+- lwIP SNTP client: enabled, max 3 servers, re-syncs internally every 3 hours
+- USB-CDC build flags, keep them, they are what makes upload and Serial Monitor work:
+  - `-D ARDUINO_USB_MODE=1`
+  - `-D ARDUINO_USB_CDC_ON_BOOT=1`
 
----
+Last clean build: 0 errors, 0 warnings
 
-## 2. Software stack (all ✅ read from this environment)
+- RAM: 39 152 / 327 680 bytes (11.9 %)
+- Flash: 1 053 599 / 1 310 720 bytes (80.4 %) of the default app partition
 
-- PlatformIO Core v6 → commands are `pio run …`; the old `platformio build`
-  subcommand no longer exists
-- Platform package: `espressif32` 8.0.0
-- Framework: Arduino, core release **3.3.12**
-- ESP-IDF baked into the prebuilt core libs: **5.5.5**
-- Only external library: `olikraus/U8g2` **2.36.18**
-- lwIP SNTP client: enabled, max 3 servers, internal re-sync every 3 h
-  (`CONFIG_LWIP_SNTP_UPDATE_DELAY=10800000`)
-- USB build flags — keep them, they are what makes upload + Serial Monitor work:
-  `-D ARDUINO_USB_MODE=1`, `-D ARDUINO_USB_CDC_ON_BOOT=1`
-- Serial Monitor speed: 115200 (`monitor_speed` + `Serial.begin(115200)`)
-- Upload speed default: 460800 baud
+## Display
 
-Last clean build — 0 errors, 0 warnings:
+The OLED talks to the board over I2C.
 
-- RAM: 39 152 / 327 680 B (11.9 %)
-- Flash: 1 053 599 / 1 310 720 B (80.4 %) of the default app partition
-
----
-
-## 3. Built-in OLED display
-
-Confirmed ✅:
-
-- Interface: **I2C**
-- SDA: **GPIO 5**
-- SCL: **GPIO 6**
-- I2C address: **0x3D** — detected with a real I2C scanner. Never document 0x3C
-  (that is the generic SSD1306 default and is wrong for this board). U8g2 is
-  given the shifted value `0x3D * 2`.
-
-Not verified ❓:
-
-- Resolution **72 × 40 px** — assumed, because the code compiles the U8g2 class
-  `U8G2_SSD1306_72X40_ER_F_HW_I2C` and the earlier "OLED OK!" test drew inside
-  those bounds. No independent probe yet.
-- Controller **SSD1306** — assumed from the same class plus the I2C behaviour.
-- Diagonal **0.42 inch** — 📦 seller listing only, never measured.
-
-Best available evidence (library, not a hardware probe): U8g2's driver
-`u8x8_d_ssd1306_72x40_er` is commented as an "EastRising 0.41 OLED / 0.42-inch
-72x40 I2C/SPI SSD1306" panel. That supports the SSD1306 + 72×40 assumption but
-does not prove it.
-
-Driver facts read from the U8g2 source (true about the library; still ❓ about
-our panel):
-
-- `pixel_width / pixel_height` = 72 / 40
-- `default_x_offset` = **28** — the 72 px window sits at column 28 inside the
-  SSD1306's 128 px addressing; this is what the `ER` suffix means
-- Frame buffer `u8g2_m_9_5_f` = 9 × 5 tiles × 8 = **360 bytes** of RAM
-- I2C adapter `u8x8_cad_ssd13xx_fast_i2c`, transport `u8x8_byte_arduino_hw_i2c`
-- Init sequence sent once by `display.begin()`:
-
-  ```
-  0xAE off · 0xD5/0x80 clock+osc · 0xA8/0x27 multiplex (1/40 duty) · 0xD3/0x00 offset
-  0xAD/0x30 internal IREF (needed on this panel, u8g2 issue #1047) · 0x8D/0x14 charge pump
-  0x40 start line · 0xA6 normal · 0xA4 RAM→display · 0x20/0x00 horizontal addressing
-  0xA1 segment remap · 0xC8 scan dir · 0xDA/0x12 COM config · 0x81/0xAF contrast
-  0xD9/0x22 pre-charge · 0xDB/0x20 vcomh · 0x2E no-scroll
-  ```
-
-- Power save: `0xAF` on / `0xAE` off; flip modes `0xA1/0xC8` vs `0xA0/0xC0`
-
-Code — do not change the pins or the address:
+- SDA: GPIO 5
+- SCL: GPIO 6
+- I2C address: `0x3D` — U8g2 takes the shifted value `0x3D * 2`
+- `setI2CAddress()` must run before `display.begin()`
 
 ```cpp
 U8G2_SSD1306_72X40_ER_F_HW_I2C display(U8G2_R0, U8X8_PIN_NONE, 6, 5); // SCL=6, SDA=5
-display.setI2CAddress(0x3D * 2);   // must run before begin()
+display.setI2CAddress(0x3D * 2);
 display.begin();
 ```
 
-Pixel budget currently in use (72 px wide, 40 px tall):
+`display.begin()` sends the full SSD1306 init sequence, there is nothing to configure by hand.
+
+The panel is 72 × 40 px. What is drawn on it:
 
 - Date line — `u8g2_font_6x10_tf`, `12.11.2026` = 60 px, baseline y = 16
 - Time line — `u8g2_font_6x10_tf`, `15:45:32` = 48 px, baseline y = 29
 - Status line — `u8g2_font_5x7_tf`, `Sync time...` = 60 px, baseline y = 20
-- Status strings in use: `WiFi...`, `Sync time...`, `No WiFi`
-- Centring is automatic via `getStrWidth()`; text wider than 72 px is clamped to
-  x = 0 and truncated by the 12-byte line buffers — check `getStrWidth()` before
-  adding any longer message
+- Status strings in use: `WiFi...`, `Sync time...`, `No WiFi`, `Feeding`
 
-How to re-verify the display if it is ever in doubt:
+Text is centred with `getStrWidth()`. Anything wider than 72 px is clamped to x = 0 and cut off by the 12-byte line buffers, so check `getStrWidth()` before adding a longer message.
 
-1. Run an I2C scanner over GPIO 5/6 — it must report `0x3D` (already ✅)
-2. Draw a frame at `(0,0,72,40)` and a pixel at `(71,39)`; if the corner lights
-   up, 72×40 is confirmed
-3. There is no "query controller" command on these chips — the practical test is
-   the I2C address plus which U8g2 device class actually renders
+Fonts dominate the flash budget: each extra `_tf` font costs about 1.6 KB (`u8g2_font_5x7_tf` is 1612 bytes), and about 250 KB is left in the app partition.
 
----
+If the panel size is ever in doubt, run an I2C scanner over GPIO 5/6 — it must report `0x3D`.
 
-## 4. Project layout
+## Project layout
 
-- `platformio.ini` — board, USB-CDC flags, `monitor_speed` (don't churn it)
-- `include/wifi_config.h` — **real credentials**, git-ignored, created by the user
+- `platformio.ini` — board, USB-CDC flags, `monitor_speed`
+- `include/wifi_config.h` — real credentials, git-ignored, created by the user
 - `include/wifi_config.example.h` — tracked template showing the format
 - `src/main.cpp` — credential include guard, module objects, non-blocking `loop()`
 - `src/wifi_manager.{h,cpp}` — WiFi state machine: CONNECTING / CONNECTED / LOST
-- `src/time_manager.{h,cpp}` — NTP sync + cached local `tm` (Europe/Kyiv)
-- `src/display_manager.{h,cpp}` — owns the U8g2 object, centred rendering,
-  redraw only on change
-- `src/motor_manager.{h,cpp}` — **mock** motor seam: `startRotation()` /
-  `stopRotation()` only log, no pin is configured
-- `src/feeder_manager.{h,cpp}` — time-of-day schedule + `IDLE`/`ROTATING`
-  state machine, drives the motor through `MotorManager`
+- `src/time_manager.{h,cpp}` — NTP sync and cached local `tm`
+- `src/display_manager.{h,cpp}` — owns the U8g2 object, centred rendering, redraw only on change
+- `src/motor_manager.{h,cpp}` — motor seam, currently a mock
+- `src/feeder_manager.{h,cpp}` — time-of-day schedule and IDLE/ROTATING state machine
 
-Modules:
+### WiFiManager
 
-- **WiFiManager** — `begin(ssid, pwd)`, `update()`, `state()`, `connected()`
-  - `begin()` only starts the async handshake
-  - `update()` polls once per loop pass, prints the assigned IP on success,
-    retries after a timeout/hard failure, re-arms 10 s after a lost link
-- **TimeManager** — `begin()`, `update(wifiConnected)`, `hasValidTime()`, `localTime()`
-  - arms lwIP SNTP via `configTzTime()` only when WiFi is up
-  - success = the system clock reports year ≥ 2020 (never compile-time `__DATE__`)
-  - retries after 20 s, re-arms every 15 min, reads the clock at most once a second
-- **DisplayManager** — `begin()`, `showStatus(text)`, `showClock(tm)`
-  - redraws only when the rendered strings actually change → ~1 redraw/s while
-    the clock runs, 0 redraws for a static status message
-- **MotorManager** — `begin()`, `update()`, `startRotation()`, `stopRotation()`,
-  `state()` — **mock today**, see §4b
-- **FeederManager** — `begin(motor&)`, `update(timeValid, clock)`, `state()`,
-  `feeding()`
-  - `begin()` injects the motor by reference; no virtuals, no heap
-  - a due slot starts the rotation and the duration is measured with `millis()`
-    on later loop passes — nothing ever blocks
-  - one meal per slot per calendar day; the flags reset on `tm_yday`/`tm_year`
-    change
-  - the first valid clock **primes** slots that are already in the past without
-    feeding, so booting at 15:45 does not dump food twice
-  - a clock that jumps **forward** past a slot still feeds it, late and logged;
-    a clock that jumps **back** never re-feeds an already-fired slot
+`begin(ssid, pwd)`, `update()`, `state()`, `connected()`
 
-Nothing blocks: no `delay()`, no `waitForConnectResult()`, no
-`while(!WiFi.isConnected())`. All periodic work runs on `millis()`.
+- `begin()` only starts the async handshake
+- `update()` polls once per loop pass, prints the assigned IP on success, retries after a timeout or hard failure, re-arms 10 s after a lost link
 
-Tunables:
+### TimeManager
+
+`begin()`, `update(wifiConnected)`, `hasValidTime()`, `localTime()`
+
+- arms lwIP SNTP through `configTzTime()` only when WiFi is up
+- a sync counts as successful when the system clock reports a year of 2020 or later, never the compile-time `__DATE__`
+- retries after 20 s, re-arms every 15 min, reads the clock at most once a second
+
+### DisplayManager
+
+`begin()`, `showStatus(text)`, `showClock(tm)`
+
+- redraws only when the rendered strings actually change: about one redraw per second while the clock runs, none for a static status message
+
+### MotorManager
+
+`begin()`, `update()`, `startRotation()`, `stopRotation()`, `state()` — mock today, see the Motor section
+
+### FeederManager
+
+`begin(motor&)`, `update(timeValid, clock)`, `state()`, `feeding()`
+
+- `begin()` injects the motor by reference, no virtuals and no heap
+- a due slot starts the rotation and the duration is measured with `millis()` on later loop passes, nothing blocks
+- one meal per slot per calendar day, the flags reset when `tm_yday` or `tm_year` change
+- the first valid clock marks slots that are already in the past as done without feeding, so booting at 15:45 does not dump food for the 06:30 slot
+- a clock that jumps forward past a slot still feeds it, late and logged; a clock that jumps back never re-feeds a slot that already fired
+
+Nothing blocks: no `delay()`, no `waitForConnectResult()`, no `while(!WiFi.isConnected())`. All periodic work runs on `millis()`.
+
+### Tunables
 
 - `CONNECT_TIMEOUT_MS` = 30 s, `RECONNECT_DELAY_MS` = 10 s — `src/wifi_manager.cpp`
-- `TIMEZONE` = `EET-2EEST,M3.5.0/3,M10.5.0/4`, `NTP_SERVER_1` = `pool.ntp.org`,
-  `NTP_SERVER_2` = `time.google.com` — `src/time_manager.cpp`
-- `SYNC_TIMEOUT_MS` = 20 s, `RESYNC_INTERVAL_MS` = 15 min,
-  `CLOCK_REFRESH_MS` = 1000 ms — `src/time_manager.cpp`
+- `TIMEZONE` = `EET-2EEST,M3.5.0/3,M10.5.0/4`, `NTP_SERVER_1` = `pool.ntp.org`, `NTP_SERVER_2` = `time.google.com` — `src/time_manager.cpp`
+- `SYNC_TIMEOUT_MS` = 20 s, `RESYNC_INTERVAL_MS` = 15 min, `CLOCK_REFRESH_MS` = 1000 ms — `src/time_manager.cpp`
 - `STATUS_Y` = 20, `CLOCK_LINE1_Y` = 16, `CLOCK_LINE2_Y` = 29 — `src/display_manager.cpp`
-- `SCHEDULE` = 06:30 / 15:00 / 22:00, `ROTATION_MS` = 5 s,
-  `MAX_FEED_SLOTS` = 3 — `src/feeder_manager.cpp` (`MAX_FEED_SLOTS` is in
-  `src/feeder_manager.h`); a `static_assert` keeps the table and the array in
-  step when the schedule grows
+- `SCHEDULE` = 06:30 / 15:00 / 22:00, `ROTATION_MS` = 5 s — `src/feeder_manager.cpp`; `MAX_FEED_SLOTS` = 3 is in `src/feeder_manager.h`, and a `static_assert` keeps the table and the array in step when the schedule grows
 
-Schedule times are **local** minutes of the day (`tm_hour * 60 + tm_min`), never
-a fixed UTC offset — `TimeManager` already applies the Europe/Kyiv DST rules
-above, so 06:30 stays 06:30 wall-clock across both DST switches.
+Schedule times are local minutes of the day (`tm_hour * 60 + tm_min`), never a fixed UTC offset. `TIMEZONE` is the Europe/Kyiv rule: DST starts the last Sunday of March at 03:00 local standard and ends the last Sunday of October at 04:00 local DST. The rule has been unchanged since 2011, so 06:30 stays 06:30 wall-clock through both switches.
 
-Timezone note: the POSIX string above is the Europe/Kyiv rule checked against
-`zdump` — DST starts the last Sunday of March at 03:00 local standard (→ 04:00
-EEST) and ends the last Sunday of October at 04:00 local DST (→ 03:00 EET). It is
-correct from 2011 to present, so winter/summer time switches itself; never
-hardcode a fixed UTC offset.
+## Motor — not implemented yet
 
----
+`src/motor_manager.cpp` is a mock: `startRotation()` and `stopRotation()` only log a line, no pin is configured, no motor library is used.
 
-## 4b. The step-motor — NOT implemented yet
-
-Everything below is ❓ **planned, not probed**. No motor, controller or pin has
-ever been attached or tested; the code in `src/motor_manager.cpp` is a mock.
-
-The point of the split is that a hardware swap touches **one file**:
+The split is there so that wiring a real motor touches one file:
 
 ```
 FeederManager  →  policy only: when to feed, how long to run, IDLE/ROTATING
@@ -224,34 +140,24 @@ MotorManager   →  the seam: startRotation() / stopRotation() / configurePins()
                   later = pin numbers, pinType, attach(), direction, jam detect
 ```
 
-`MotorManager::update()` is already called from `loop()` even though the mock
-leaves it empty — stepper-style motor libraries need a per-loop tick, and having
-the hook now means `main.cpp` does not change when the real motor lands.
+`MotorManager::update()` is already called from `loop()` even though the mock leaves it empty. Stepper-style motor libraries need a tick per loop pass, and having the hook now means `main.cpp` does not change when the real motor arrives.
 
-To be filled in once the hardware is known, in `src/motor_manager.cpp` only:
+When the hardware is known, fill in only these in `src/motor_manager.cpp`:
 
-| Slot | What lands there |
-|---|---|
-| `configurePins()` | motor/controller pin numbers, `pinType`, `attach()` if a stepper library is used, direction, speed |
-| `startRotation()` / `stopRotation()` | the real actuation |
-| `update()` | the per-loop tick the library needs |
-| `MotorState::NOT_CONFIGURED` | keep it until pins are actually wired |
+- `configurePins()` — motor/controller pin numbers, `pinType`, `attach()` if a stepper library is used, rotation direction and speed
+- `startRotation()` / `stopRotation()` — the real actuation
+- `update()` — the per-loop tick the library needs
+- `MotorState::NOT_CONFIGURED` — keep it until the pins are actually wired
 
-Pin constraints — only the first two rows are established:
+Pins:
 
-- ✅ GPIO 5 (SDA) and 6 (SCL) are taken by the OLED — do not repurpose
-- ✅ GPIO numbers on ESP32-C3 run 0–21 (Espressif hardware reference)
-- ❓ which of the remaining lines are boot-reserved on this board — **probe
-  before choosing**, do not copy a generic ESP32 pin table
-- ❓ motor model, controller model and the physical pins — unknown, nothing
-  ordered or measured
+- GPIO 5 (SDA) and 6 (SCL) are taken by the OLED, do not repurpose them
+- GPIO numbers on ESP32-C3 run 0–21; check which of the rest are boot-reserved on this board before choosing
+- Motor model, controller model and the physical pins are still unknown
 
-No library is needed for the mock, so `lib_deps` still lists only `olikraus/U8g2`.
-A stepper library would be added there when the real motor arrives.
+`lib_deps` still lists only `olikraus/U8g2`. A stepper library gets added there when the real motor arrives.
 
----
-
-## 5. Build, upload, monitor
+## Build, upload, monitor
 
 ```bash
 cd /home/snaildog/Documents/Experiments/Devices/CatFeeder/Firmware/CatFeeder
@@ -265,8 +171,7 @@ pio device list                            # find the device node
 ```
 
 - If `pio` is not on `PATH`, use `~/.platformio/penv/bin/pio …`
-- `include/wifi_config.h` must exist before building; otherwise the build fails
-  on purpose with:
+- `include/wifi_config.h` must exist before building, otherwise the build fails on purpose:
 
   ```
   error: #error "Missing include/wifi_config.h: copy include/wifi_config.example.h to include/wifi_config.h and define WIFI_SSID and WIFI_PASSWORD."
@@ -288,8 +193,7 @@ pio device list                            # find the device node
 
 - OLED sequence: `WiFi...` → `Sync time...` → `12.11.2026` / `15:45:32`
 - Kill the network and you should see `No WiFi` plus reconnect attempts every 10 s
-- At a scheduled minute the trace continues (no motor exists yet, the mock only
-  logs):
+- At a scheduled minute the trace continues (the mock only logs):
 
   ```
   Feeder: slot 1 due at 15:00
@@ -298,53 +202,13 @@ pio device list                            # find the device node
   ```
 
   and the OLED shows `Feeding` for those 5 s instead of the clock
-- `Feeder: slot N fired M min late` means the clock jumped forward past that
-  slot (DST or an NTP correction) — the meal still happens
+- `Feeder: slot N fired M min late` means the clock jumped forward past that slot, the meal still happens
 
----
+## Notes
 
-## 6. Gotchas
-
-- ESP32-C3 is RISC-V — no Xtensa, no AVP, no S3-style SRAM. Don't pull in
-  ESP32-S3 / ESP32-C6 specific libraries.
-- Keep the USB-CDC `build_flags`; they are what makes upload + Serial Monitor work.
-- Keep GPIO 5/6 and I2C address `0x3D`; `setI2CAddress()` must run **before**
-  `display.begin()`.
-- U8g2 fonts dominate flash: each extra `_tf` font ≈ 1.6 KB
-  (`u8g2_font_5x7_tf` is 1612 bytes). ~250 KB margin left in the app partition.
-- `WiFi.begin()` is non-blocking in core 3.3.12 (it only calls
-  `esp_wifi_connect()`); polling `WiFi.isConnected()` is the right pattern.
-- lwIP's SNTP client already re-polls on its own every 3 h; the app's 15-minute
-  re-arm is what gives faster, visible re-sync and retry logging.
-- Credentials are compile-time macros in a git-ignored header — never move them
-  into `main.cpp`, never commit `include/wifi_config.h`.
-- The schedule is compared in **local** minutes of the day, never against a
-  `time_t` built from a fixed UTC offset — that breaks on both DST switches.
-- `FeederManager` measures the rotation with `millis() - start >= ROTATION_MS`,
-  the same wrap-safe form the other modules use; never compare `millis()`
-  against an absolute value.
-- `MotorManager` is a **mock**. Do not add pins to `main.cpp` or `FeederManager`
-  when the real motor arrives — everything goes into `src/motor_manager.cpp`.
-- Feeding is gated on `hasValidTime()`: if NTP never succeeds that day, the cat
-  is not fed. There is no manual override yet.
-
-## 7. Proven vs assumed
-
-- ✅ Builds and links for `esp32-c3-devkitm-1`, 0 warnings, RAM 11.9 %,
-  Flash 80.4 % of the default app partition
-- ✅ Feeding schedule logic — verified natively against the real
-  `src/feeder_manager.cpp` + `src/motor_manager.cpp` with stubbed `millis()`/
-  `Serial`: one meal per slot per day, flags reset on date rollover, past slots
-  primed without feeding on the first valid clock, forward clock jump feeds late
-  and logs it, backward DST jump does not re-feed
-- ✅ USB-CDC upload + 115200 Serial Monitor (tested earlier on this board)
-- ✅ OLED over I2C, GPIO 5 = SDA, GPIO 6 = SCL, address **0x3D** (I2C scanner)
-- ❓ OLED 72 × 40 and controller SSD1306 — library evidence only, not probed
-- ❓ Motor — **nothing**. No motor, no controller, no pins attached or probed;
-  `startRotation()`/`stopRotation()` are empty mocks
-- 📦 0.42-inch diagonal, ESP32-C3FN4/FH4, ceramic antenna, interface-channel
-  counts (4 MB flash and 160 MHz do match the board definition)
-- ❓ Firmware flashed and observed running — not done in this session (no ESP
-  device was attached)
-
-
+- ESP32-C3 is RISC-V — no Xtensa, no AVP, no S3-style SRAM. Don't pull in ESP32-S3 or ESP32-C6 specific libraries.
+- `WiFi.begin()` is non-blocking in Arduino core 3.3.12 (it only calls `esp_wifi_connect()`); polling `WiFi.isConnected()` is the right pattern.
+- lwIP's SNTP client re-polls on its own every 3 hours; the app's 15-minute re-arm is what gives faster, visible re-sync and retry logging.
+- Credentials are compile-time macros in the git-ignored `include/wifi_config.h` — never move them into `main.cpp`, never commit that file.
+- Never compare `millis()` against an absolute value; use `millis() - start >= …` so the wrap at 2^32 is safe.
+- Feeding only happens when `hasValidTime()` is true: if NTP never succeeds that day, the cat is not fed. There is no manual override yet.
